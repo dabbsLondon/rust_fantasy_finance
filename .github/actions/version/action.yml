@@ -3,8 +3,10 @@ description: 'Calculate Docker tag and repository name and tag the repo.'
 outputs:
   tag:
     description: 'Version tag'
+    value: ${{ steps.vars.outputs.tag }}
   repo:
     description: 'Normalized repository name'
+    value: ${{ steps.vars.outputs.repo }}
 runs:
   using: 'composite'
   steps:
