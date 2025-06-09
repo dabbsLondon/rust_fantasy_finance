@@ -19,7 +19,7 @@ cargo test
 ## Building the Docker image
 
 ```bash
-docker build -t rust_fantasy_finance:latest .
+docker build -t rust-fantasy-finance:latest .
 ```
 
 ## GitHub Actions
@@ -27,6 +27,6 @@ docker build -t rust_fantasy_finance:latest .
 Two workflows are provided:
 
 - **test.yml** – runs `cargo test` on every push.
-- **docker.yml** – builds and publishes a versioned image to GitHub Container Registry. The image is tagged as `ghcr.io/<owner>/<repo>:<git short sha>`.
+- **docker.yml** – builds and publishes a versioned image to GitHub Container Registry. The Docker tag uses the package version from `Cargo.toml` with the branch name appended for non-main branches (e.g. `0.1.0` or `0.1.0_feature`). The repository is also tagged with the same value.
 
 
