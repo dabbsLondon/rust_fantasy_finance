@@ -1,0 +1,34 @@
+name: Build Docker
+
+on:
+  push:
+    branches: ["**"]
+
+permissions:
+  packages: write
+  contents: write
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      - run: cargo build --release
+      - id: version
+        uses: ./.github/actions/version
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push
+        run: |
+          IMAGE=ghcr.io/${{ steps.version.outputs.repo }}:${{ steps.version.outputs.tag }}
+          docker build -t $IMAGE .
+          docker push $IMAGE
+
