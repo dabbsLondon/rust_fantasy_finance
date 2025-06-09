@@ -27,7 +27,7 @@ docker build -t rust-fantasy-finance:latest .
 Two workflows are provided:
 
 - **test.yml** – runs `cargo test` on every push.
-- **docker.yml** – builds and publishes a versioned image to GitHub Container Registry. The Docker tag uses the package version from `Cargo.toml` with the branch name appended for non-main branches (e.g. `0.1.0` or `0.1.0_feature`). The repository is also tagged with the same value.
+- **docker.yml** – builds and publishes a versioned image to GitHub Container Registry. Tags include the short commit SHA to avoid collisions. Main branch builds automatically bump the minor version while other branches keep the version from `Cargo.toml` and append the branch name. Examples: `0.1.1-abc123` for main or `0.1.0_feature-abc123` for a branch.
 
 The tagging logic lives in a reusable composite action at `.github/actions/version`.
 The workflow requires `contents: write` permissions so the action can push tags to the repository.

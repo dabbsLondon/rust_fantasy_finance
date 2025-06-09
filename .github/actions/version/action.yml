@@ -13,13 +13,30 @@ runs:
     - id: vars
       shell: bash
       run: |
+        git fetch --tags --quiet
         VERSION=$(grep '^version' Cargo.toml | head -n1 | cut -d '"' -f2)
-        BRANCH="${GITHUB_REF#refs/heads/}"
-        BRANCH_LOWER=$(echo "$BRANCH" | tr '[:upper:]' '[:lower:]')
+        MAJOR=$(echo "$VERSION" | cut -d '.' -f1)
+        MINOR=$(echo "$VERSION" | cut -d '.' -f2)
+        PATCH=$(echo "$VERSION" | cut -d '.' -f3)
         if [ "$GITHUB_REF" = 'refs/heads/main' ]; then
-          TAG="$VERSION"
+          LAST=$(git tag --list "$MAJOR.*.$PATCH*" |
+            sed -n "s/^$MAJOR\.\([0-9]\+\)\.$PATCH.*$/\1/p" | sort -n | tail -n1)
+          if [ -z "$LAST" ]; then
+            NEXT_MINOR=$MINOR
+          else
+            NEXT_MINOR=$((LAST + 1))
+          fi
+          BASE_VERSION="$MAJOR.$NEXT_MINOR.$PATCH"
         else
-          TAG="${VERSION}_${BRANCH_LOWER}"
+          BASE_VERSION="$VERSION"
+        fi
+        SHA=$(git rev-parse --short HEAD)
+        BRANCH="${GITHUB_REF#refs/heads/}"
+        BRANCH_LOWER=$(echo "$BRANCH" | tr '[:upper:]' '[:lower:]' | tr '/' '-')
+        if [ "$GITHUB_REF" = 'refs/heads/main' ]; then
+          TAG="${BASE_VERSION}-${SHA}"
+        else
+          TAG="${BASE_VERSION}_${BRANCH_LOWER}-${SHA}"
         fi
         REPO=$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]' | tr '_' '-')
         echo "tag=$TAG" >> "$GITHUB_OUTPUT"
