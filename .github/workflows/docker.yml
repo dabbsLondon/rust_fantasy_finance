@@ -18,25 +18,8 @@ jobs:
           toolchain: stable
           override: true
       - run: cargo build --release
-      - id: vars
-        run: |
-          VERSION=$(grep '^version' Cargo.toml | head -n1 | cut -d '"' -f2)
-          BRANCH="${GITHUB_REF#refs/heads/}"
-          BRANCH_LOWER=$(echo "$BRANCH" | tr '[:upper:]' '[:lower:]')
-          if [ "$GITHUB_REF" = "refs/heads/main" ]; then
-            TAG="$VERSION"
-          else
-            TAG="${VERSION}_${BRANCH_LOWER}"
-          fi
-          REPO=$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]' | tr '_' '-')
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "repo=$REPO" >> "$GITHUB_OUTPUT"
-      - name: Tag repository
-        run: |
-          git config user.name github-actions
-          git config user.email github-actions@github.com
-          git tag "${{ steps.vars.outputs.tag }}"
-          git push origin "${{ steps.vars.outputs.tag }}"
+      - id: version
+        uses: ./.github/actions/version
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -45,7 +28,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and push
         run: |
-          IMAGE=ghcr.io/${{ steps.vars.outputs.repo }}:${{ steps.vars.outputs.tag }}
+          IMAGE=ghcr.io/${{ steps.version.outputs.repo }}:${{ steps.version.outputs.tag }}
           docker build -t $IMAGE .
           docker push $IMAGE
 

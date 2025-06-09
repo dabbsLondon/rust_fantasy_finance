@@ -4,4 +4,6 @@
 - Docker images pushed by GitHub Actions are tagged using the package version.
   Images for the `main` branch use `0.0.0` style tags while other branches use
   `0.0.0_branchname` (branch lowercased).
+ - The tag calculation and repository tagging are implemented in
+   `.github/actions/version`.
 

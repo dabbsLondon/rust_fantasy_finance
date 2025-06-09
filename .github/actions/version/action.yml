@@ -1,0 +1,31 @@
+name: 'Compute Version'
+description: 'Calculate Docker tag and repository name and tag the repo.'
+outputs:
+  tag:
+    description: 'Version tag'
+  repo:
+    description: 'Normalized repository name'
+runs:
+  using: 'composite'
+  steps:
+    - id: vars
+      shell: bash
+      run: |
+        VERSION=$(grep '^version' Cargo.toml | head -n1 | cut -d '"' -f2)
+        BRANCH="${GITHUB_REF#refs/heads/}"
+        BRANCH_LOWER=$(echo "$BRANCH" | tr '[:upper:]' '[:lower:]')
+        if [ "$GITHUB_REF" = 'refs/heads/main' ]; then
+          TAG="$VERSION"
+        else
+          TAG="${VERSION}_${BRANCH_LOWER}"
+        fi
+        REPO=$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]' | tr '_' '-')
+        echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+        echo "repo=$REPO" >> "$GITHUB_OUTPUT"
+    - name: Tag repository
+      shell: bash
+      run: |
+        git config user.name github-actions
+        git config user.email github-actions@github.com
+        git tag "${{ steps.vars.outputs.tag }}"
+        git push origin "${{ steps.vars.outputs.tag }}"
