@@ -1,6 +1,26 @@
 # Rust Fantasy Finance
 
-This project is a minimal REST API built with [Axum](https://github.com/tokio-rs/axum). It exposes a single `GET /` endpoint that returns "Hello, world!".
+This project is a minimal REST API built with [Axum](https://github.com/tokio-rs/axum). It exposes a simple greeting at `GET /` and a holdings service for recording stock transactions.
+
+### Endpoints
+
+- `POST /holdings/transaction` – add a transaction in JSON with `user`, `symbol`, `amount` and `price`.
+- `GET /holdings/orders` – list all recorded transactions.
+- `GET /holdings/orders/<user>` – list transactions for a specific user. Returns `404` if the user has no orders stored.
+
+Transactions are kept in memory and flushed to Parquet files under `data/<user>/orders.parquet`.
+
+#### Example requests
+
+```bash
+curl -X POST http://localhost:3000/holdings/transaction \
+  -H 'content-type: application/json' \
+  -d '{"user":"alice","symbol":"AAPL","amount":5,"price":10.0}'
+
+curl http://localhost:3000/holdings/orders
+
+curl http://localhost:3000/holdings/orders/alice
+```
 
 ## Running locally
 

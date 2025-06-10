@@ -1,0 +1,54 @@
+{
+  "info": {
+    "name": "Rust Fantasy Finance",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Add transaction",
+      "request": {
+        "method": "POST",
+        "header": [
+          {"key": "Content-Type", "value": "application/json"}
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"user\": \"alice\",\n  \"symbol\": \"AAPL\",\n  \"amount\": 5,\n  \"price\": 10.0\n}"
+        },
+        "url": {
+          "raw": "http://localhost:3000/holdings/transaction",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "3000",
+          "path": ["holdings", "transaction"]
+        }
+      }
+    },
+    {
+      "name": "List all orders",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "http://localhost:3000/holdings/orders",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "3000",
+          "path": ["holdings", "orders"]
+        }
+      }
+    },
+    {
+      "name": "List orders for user",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "http://localhost:3000/holdings/orders/alice",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "3000",
+          "path": ["holdings", "orders", "alice"]
+        }
+      }
+    }
+  ]
+}
