@@ -12,6 +12,8 @@ serde_json = "1"
 arrow-array = "55.1"
 arrow-schema = "55.1"
 parquet = "55.1"
+thiserror = "1"
+anyhow = "1"
 
 [dev-dependencies]
 tempfile = "3"

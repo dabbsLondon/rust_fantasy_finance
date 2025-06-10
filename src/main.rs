@@ -1,9 +1,11 @@
 mod holdings;
+mod error;
 
 use axum::{routing::{get, post}, Router, response::IntoResponse, extract::{Path, State}, Json};
 use tokio::net::TcpListener;
 use std::path::PathBuf;
 use holdings::{HoldingStore, OrderRequest};
+use error::AppError;
 
 async fn hello() -> impl IntoResponse {
     "Hello, world!"
@@ -12,28 +14,25 @@ async fn hello() -> impl IntoResponse {
 async fn add_transaction(
     State(store): State<HoldingStore>,
     Json(req): Json<OrderRequest>,
-) -> impl IntoResponse {
-    use axum::http::StatusCode;
-    match store.add_order(req.into()).await {
-        Ok(_) => StatusCode::CREATED,
-        Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
-    }
+) -> Result<impl IntoResponse, AppError> {
+    store
+        .add_order(req.into())
+        .await
+        .map(|_| axum::http::StatusCode::CREATED)
+        .map_err(AppError::from)
 }
 
-async fn list_orders(State(store): State<HoldingStore>) -> impl IntoResponse {
+async fn list_orders(State(store): State<HoldingStore>) -> Result<impl IntoResponse, AppError> {
     let orders = store.all_orders().await;
-    Json(orders)
+    Ok(Json(orders))
 }
 
 async fn list_orders_for_user(
     Path(user): Path<String>,
     State(store): State<HoldingStore>,
-) -> impl IntoResponse {
-    use axum::http::StatusCode;
-    match store.orders_for_user(&user).await {
-        Ok(orders) => Ok(Json(orders).into_response()),
-        Err(_) => Err(StatusCode::NOT_FOUND),
-    }
+) -> Result<impl IntoResponse, AppError> {
+    let orders = store.orders_for_user(&user).await?;
+    Ok(Json(orders).into_response())
 }
 
 #[tokio::main]
