@@ -16,6 +16,7 @@ thiserror = "1"
 anyhow = "1"
 yahoo_finance_api = "4"
 async-trait = "0.1"
+chrono = "0.4"
 
 [dev-dependencies]
 tempfile = "3"
