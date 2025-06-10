@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM rust:1 as builder
+FROM rust:1-bullseye as builder
 WORKDIR /usr/src/app
 COPY . .
 RUN cargo install --path . --locked

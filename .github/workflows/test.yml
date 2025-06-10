@@ -13,5 +13,16 @@ jobs:
         with:
           toolchain: stable
           override: true
-      - run: cargo test --verbose
+      - name: Run tests
+        run: cargo test --verbose | tee test.log
+      - name: Test summary
+        if: always()
+        run: |
+          echo "### Test Results" >> "$GITHUB_STEP_SUMMARY"
+          grep '^test ' test.log >> "$GITHUB_STEP_SUMMARY" || true
+          grep '^test result:' test.log >> "$GITHUB_STEP_SUMMARY" || true
+          if grep -q '^failures:' test.log; then
+            echo '' >> "$GITHUB_STEP_SUMMARY"
+            sed -n '/^failures:/,/^test result:/p' test.log >> "$GITHUB_STEP_SUMMARY"
+          fi
 
