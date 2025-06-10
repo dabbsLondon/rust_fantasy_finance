@@ -5,6 +5,18 @@
   },
   "item": [
     {
+      "name": "Hello",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "http://localhost:3000/",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "3000"
+        }
+      }
+    },
+    {
       "name": "Add transaction",
       "request": {
         "method": "POST",
@@ -47,6 +59,19 @@
           "host": ["localhost"],
           "port": "3000",
           "path": ["holdings", "orders", "alice"]
+        }
+      }
+    },
+    {
+      "name": "Market prices",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "http://localhost:3000/market/prices",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "3000",
+          "path": ["market", "prices"]
         }
       }
     }
