@@ -32,6 +32,15 @@ docker pull ghcr.io/<github-user>/rust-fantasy-finance:<tag>
 docker run --rm -p 3000:3000 ghcr.io/<github-user>/rust-fantasy-finance:<tag>
 ```
 
+The published images target the `linux/amd64` platform and run on any x86_64
+system with Docker. If you're on an Apple Silicon Mac, add
+`--platform linux/amd64` to the `docker run` command:
+
+```bash
+docker run --rm -p 3000:3000 --platform linux/amd64 \
+  ghcr.io/<github-user>/rust-fantasy-finance:<tag>
+```
+
 ## GitHub Actions
 
 Two workflows are provided:

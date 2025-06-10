@@ -39,5 +39,9 @@ jobs:
           echo '' >> "$GITHUB_STEP_SUMMARY"
           echo '```bash' >> "$GITHUB_STEP_SUMMARY"
           echo "docker pull $IMAGE" >> "$GITHUB_STEP_SUMMARY"
+          echo "docker run --rm -p 3000:3000 $IMAGE" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Images are built for the linux/amd64 platform.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'On Apple Silicon, add `--platform linux/amd64` to the run command.' >> "$GITHUB_STEP_SUMMARY"
 
