@@ -22,6 +22,16 @@ cargo test
 docker build -t rust-fantasy-finance:latest .
 ```
 
+## Downloading and running the published image
+
+Images published by the workflow are available from GitHub Container Registry.
+Use the tag reported in the workflow summary to pull and run the image:
+
+```bash
+docker pull ghcr.io/<github-user>/rust-fantasy-finance:<tag>
+docker run --rm -p 3000:3000 ghcr.io/<github-user>/rust-fantasy-finance:<tag>
+```
+
 ## GitHub Actions
 
 Two workflows are provided:
