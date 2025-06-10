@@ -51,7 +51,7 @@ async fn market_prices(State(state): State<AppState>) -> impl IntoResponse {
 async fn main() {
     let store = HoldingStore::new(PathBuf::from("data"));
     let fetcher = Arc::new(YahooFetcher::new().expect("failed to create fetcher"));
-    let market = Arc::new(MarketData::new(fetcher));
+    let market = Arc::new(MarketData::new(fetcher, PathBuf::from("data/market")));
 
     let state = AppState { store: store.clone(), market: market.clone() };
 
@@ -109,7 +109,8 @@ mod tests {
                 Ok(Vec::new())
             }
         }
-        let market = Arc::new(MarketData::new(Arc::new(DummyFetcher)));
+        let market_dir = dir.path().join("market");
+        let market = Arc::new(MarketData::new(Arc::new(DummyFetcher), market_dir));
         let state = AppState { store: store.clone(), market };
         let app = Router::new()
             .route("/holdings/transaction", post(add_transaction))
@@ -177,7 +178,8 @@ mod tests {
                 Ok(Vec::new())
             }
         }
-        let market = Arc::new(MarketData::new(Arc::new(DummyFetcher)));
+        let market_dir = dir.path().join("market");
+        let market = Arc::new(MarketData::new(Arc::new(DummyFetcher), market_dir));
         let state = AppState { store: store.clone(), market };
         let app = Router::new()
             .route("/holdings/transaction", post(add_transaction))
@@ -217,7 +219,8 @@ mod tests {
             }
         }
 
-        let market = Arc::new(MarketData::new(Arc::new(MockFetcher)));
+        let market_dir = dir.path().join("market");
+        let market = Arc::new(MarketData::new(Arc::new(MockFetcher), market_dir));
         let state = AppState { store: store.clone(), market: market.clone() };
         market.update(&store).await.unwrap();
 
