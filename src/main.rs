@@ -1,9 +1,11 @@
 mod holdings;
+mod error;
 
 use axum::{routing::{get, post}, Router, response::IntoResponse, extract::{Path, State}, Json};
 use tokio::net::TcpListener;
 use std::path::PathBuf;
 use holdings::{HoldingStore, OrderRequest};
+use error::AppError;
 
 async fn hello() -> impl IntoResponse {
     "Hello, world!"
@@ -12,28 +14,25 @@ async fn hello() -> impl IntoResponse {
 async fn add_transaction(
     State(store): State<HoldingStore>,
     Json(req): Json<OrderRequest>,
-) -> impl IntoResponse {
-    use axum::http::StatusCode;
-    match store.add_order(req.into()).await {
-        Ok(_) => StatusCode::CREATED,
-        Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
-    }
+) -> Result<impl IntoResponse, AppError> {
+    store
+        .add_order(req.into())
+        .await
+        .map(|_| axum::http::StatusCode::CREATED)
+        .map_err(AppError::from)
 }
 
-async fn list_orders(State(store): State<HoldingStore>) -> impl IntoResponse {
+async fn list_orders(State(store): State<HoldingStore>) -> Result<impl IntoResponse, AppError> {
     let orders = store.all_orders().await;
-    Json(orders)
+    Ok(Json(orders))
 }
 
 async fn list_orders_for_user(
     Path(user): Path<String>,
     State(store): State<HoldingStore>,
-) -> impl IntoResponse {
-    use axum::http::StatusCode;
-    match store.orders_for_user(&user).await {
-        Ok(orders) => Ok(Json(orders).into_response()),
-        Err(_) => Err(StatusCode::NOT_FOUND),
-    }
+) -> Result<impl IntoResponse, AppError> {
+    let orders = store.orders_for_user(&user).await?;
+    Ok(Json(orders).into_response())
 }
 
 #[tokio::main]
@@ -118,11 +117,44 @@ mod tests {
         assert_eq!(orders.len(), 1);
         assert_eq!(orders[0].symbol, "AAPL");
 
-        // unknown user should 404
+        // unknown user should 404 with message
         let response = app
             .oneshot(Request::builder().uri("/holdings/orders/bob").body(axum::body::Body::empty()).unwrap())
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let err: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(err["error"], "no orders for user bob");
+    }
+
+    #[tokio::test]
+    async fn test_add_transaction_failure() {
+        use std::fs::File;
+
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("not_a_dir");
+        File::create(&file_path).unwrap();
+
+        let store = HoldingStore::new(file_path);
+        let app = Router::new()
+            .route("/holdings/transaction", post(add_transaction))
+            .with_state(store);
+
+        let order = OrderRequest { user: "alice".into(), symbol: "AAPL".into(), amount: 5, price: 10.0 };
+        let response = app
+            .oneshot(Request::builder()
+                .method("POST")
+                .uri("/holdings/transaction")
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(serde_json::to_vec(&order).unwrap()))
+                .unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let err: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(err["error"].as_str().unwrap().contains("failed to persist order"));
     }
 }
