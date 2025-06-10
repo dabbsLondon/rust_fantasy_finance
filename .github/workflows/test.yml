@@ -19,10 +19,23 @@ jobs:
         if: always()
         run: |
           echo "### Test Results" >> "$GITHUB_STEP_SUMMARY"
-          grep '^test ' test.log >> "$GITHUB_STEP_SUMMARY" || true
-          grep '^test result:' test.log >> "$GITHUB_STEP_SUMMARY" || true
+          awk '/^test .* \.{3}/ {printf "| `%s` | %s |\n", $2, $NF}' test.log > table.tmp
+          if [ -s table.tmp ]; then
+            {
+              echo "| Test | Result |"
+              echo "| ---- | ------ |"
+              cat table.tmp
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          summary=$(grep '^test result:' test.log | tail -n1)
+          if [ -n "$summary" ]; then
+            echo '' >> "$GITHUB_STEP_SUMMARY"
+            echo "\`$summary\`" >> "$GITHUB_STEP_SUMMARY"
+          fi
           if grep -q '^failures:' test.log; then
             echo '' >> "$GITHUB_STEP_SUMMARY"
+            echo '<details><summary>Failures</summary>' >> "$GITHUB_STEP_SUMMARY"
             sed -n '/^failures:/,/^test result:/p' test.log >> "$GITHUB_STEP_SUMMARY"
+            echo '</details>' >> "$GITHUB_STEP_SUMMARY"
           fi
 
