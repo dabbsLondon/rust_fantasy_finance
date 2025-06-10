@@ -51,6 +51,8 @@ pub struct MarketData {
     inner: Arc<RwLock<HashMap<String, PriceInfo>>>,
 }
 
+const UPDATE_INTERVAL_SECS: u64 = 30;
+
 impl MarketData {
     pub fn new(fetcher: Arc<dyn QuoteFetcher>) -> Self {
         Self { fetcher, inner: Arc::new(RwLock::new(HashMap::new())) }
@@ -92,7 +94,7 @@ impl MarketData {
         use tokio::time::{sleep, Duration};
         loop {
             let _ = self.update(&store).await;
-            sleep(Duration::from_secs(30)).await;
+            sleep(Duration::from_secs(UPDATE_INTERVAL_SECS)).await;
         }
     }
 }
