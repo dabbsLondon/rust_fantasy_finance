@@ -3,6 +3,16 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use serde::{Serialize, Deserialize};
+use thiserror::Error;
+use anyhow::Context;
+
+#[derive(Debug, Error)]
+pub enum StoreError {
+    #[error("no orders for user {0}")]
+    NoOrders(String),
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Order {
@@ -28,12 +38,14 @@ impl HoldingStore {
         }
     }
 
-    pub async fn add_order(&self, order: Order) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn add_order(&self, order: Order) -> Result<(), StoreError> {
         {
             let mut map = self.inner.write().await;
             map.entry(order.user.clone()).or_default().push(order.clone());
         }
-        self.write_user_file(&order.user).await?;
+        self.write_user_file(&order.user)
+            .await
+            .context("failed to persist order")?;
         Ok(())
     }
 
@@ -45,7 +57,7 @@ impl HoldingStore {
     pub async fn orders_for_user(
         &self,
         user: &str,
-    ) -> Result<Vec<Order>, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<Vec<Order>, StoreError> {
         {
             let map = self.inner.read().await;
             if let Some(orders) = map.get(user) {
@@ -53,9 +65,11 @@ impl HoldingStore {
             }
         }
 
-        let loaded = self.read_user_file(user).await?;
+        let loaded = self.read_user_file(user)
+            .await
+            .with_context(|| format!("failed to load orders for {user}"))?;
         if loaded.is_empty() {
-            return Err(format!("no orders for user {user}").into());
+            return Err(StoreError::NoOrders(user.to_string()));
         }
 
         let mut map = self.inner.write().await;
@@ -63,7 +77,7 @@ impl HoldingStore {
         Ok(loaded)
     }
 
-    async fn write_user_file(&self, user: &str) -> Result<(), Box<dyn std::error::Error>> {
+    async fn write_user_file(&self, user: &str) -> anyhow::Result<()> {
         use arrow_array::{RecordBatch, StringArray, Int64Array, Float64Array};
         use arrow_schema::{Field, Schema, DataType};
         use parquet::arrow::ArrowWriter;
@@ -110,7 +124,7 @@ impl HoldingStore {
         Ok(())
     }
 
-    async fn read_user_file(&self, user: &str) -> Result<Vec<Order>, Box<dyn std::error::Error + Send + Sync>> {
+    async fn read_user_file(&self, user: &str) -> anyhow::Result<Vec<Order>> {
         use arrow_array::{Float64Array, Int64Array, StringArray};
         use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
         use std::fs::File;
