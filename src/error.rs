@@ -1,12 +1,14 @@
 use axum::{response::{IntoResponse, Response}, http::StatusCode, Json};
 use serde::Serialize;
+use thiserror::Error;
 
 #[derive(Debug, Serialize)]
 struct ErrorMessage {
     error: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[error("{message}")]
 pub struct AppError {
     pub status: StatusCode,
     pub message: String,

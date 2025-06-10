@@ -1,6 +1,7 @@
 mod holdings;
 mod error;
 mod market;
+mod state;
 
 use axum::{routing::{get, post}, Router, response::IntoResponse, extract::{Path, State}, Json};
 use tokio::net::TcpListener;
@@ -9,12 +10,8 @@ use std::sync::Arc;
 use holdings::{HoldingStore, OrderRequest};
 use market::{MarketData, YahooFetcher};
 use error::AppError;
+use state::AppState;
 
-#[derive(Clone)]
-struct AppState {
-    store: HoldingStore,
-    market: Arc<MarketData>,
-}
 
 async fn hello() -> impl IntoResponse {
     "Hello, world!"
@@ -79,6 +76,7 @@ mod tests {
     use axum::http::{Request, StatusCode};
     use holdings::Order;
     use market::{MarketData, QuoteFetcher};
+    use state::AppState;
     use async_trait::async_trait;
     use yahoo_finance_api::Quote;
     use tower::ServiceExt; // for `oneshot`
