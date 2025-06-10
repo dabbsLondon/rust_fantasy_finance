@@ -8,3 +8,8 @@
 - The tag calculation and repository tagging are implemented in
   `.github/actions/version`.
 
+- The service exposes `POST /holdings/transaction` and `GET /holdings/orders`.
+  Transactions are stored in memory and persisted to Parquet files under
+  `data/<user>/orders.parquet`. Tests should avoid relying on network access and
+  use temporary directories when touching the filesystem.
+
