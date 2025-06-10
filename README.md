@@ -7,8 +7,10 @@ This project is a minimal REST API built with [Axum](https://github.com/tokio-rs
 - `POST /holdings/transaction` – add a transaction in JSON with `user`, `symbol`, `amount` and `price`.
 - `GET /holdings/orders` – list all recorded transactions.
 - `GET /holdings/orders/<user>` – list transactions for a specific user. Returns `404` if the user has no orders stored.
+- `GET /market/prices` – current price for each symbol held by any user.
 
 Transactions are kept in memory and flushed to Parquet files under `data/<user>/orders.parquet`.
+Market prices are periodically fetched from Yahoo Finance for all symbols found in those orders and served via `/market/prices`.
 
 #### Example requests
 

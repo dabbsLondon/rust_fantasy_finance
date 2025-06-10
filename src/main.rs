@@ -1,49 +1,72 @@
 mod holdings;
 mod error;
+mod market;
 
 use axum::{routing::{get, post}, Router, response::IntoResponse, extract::{Path, State}, Json};
 use tokio::net::TcpListener;
 use std::path::PathBuf;
+use std::sync::Arc;
 use holdings::{HoldingStore, OrderRequest};
+use market::{MarketData, YahooFetcher};
 use error::AppError;
+
+#[derive(Clone)]
+struct AppState {
+    store: HoldingStore,
+    market: Arc<MarketData>,
+}
 
 async fn hello() -> impl IntoResponse {
     "Hello, world!"
 }
 
 async fn add_transaction(
-    State(store): State<HoldingStore>,
+    State(state): State<AppState>,
     Json(req): Json<OrderRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    store
+    state
+        .store
         .add_order(req.into())
         .await
         .map(|_| axum::http::StatusCode::CREATED)
         .map_err(AppError::from)
 }
 
-async fn list_orders(State(store): State<HoldingStore>) -> Result<impl IntoResponse, AppError> {
-    let orders = store.all_orders().await;
+async fn list_orders(State(state): State<AppState>) -> Result<impl IntoResponse, AppError> {
+    let orders = state.store.all_orders().await;
     Ok(Json(orders))
 }
 
 async fn list_orders_for_user(
     Path(user): Path<String>,
-    State(store): State<HoldingStore>,
+    State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
-    let orders = store.orders_for_user(&user).await?;
+    let orders = state.store.orders_for_user(&user).await?;
     Ok(Json(orders).into_response())
+}
+
+async fn market_prices(State(state): State<AppState>) -> impl IntoResponse {
+    let prices = state.market.prices().await;
+    Json(prices)
 }
 
 #[tokio::main]
 async fn main() {
     let store = HoldingStore::new(PathBuf::from("data"));
+    let fetcher = Arc::new(YahooFetcher::new().expect("failed to create fetcher"));
+    let market = Arc::new(MarketData::new(fetcher));
+
+    let state = AppState { store: store.clone(), market: market.clone() };
+
+    tokio::spawn(market.clone().run(store.clone()));
+
     let app = Router::new()
         .route("/", get(hello))
         .route("/holdings/transaction", post(add_transaction))
         .route("/holdings/orders", get(list_orders))
         .route("/holdings/orders/:user", get(list_orders_for_user))
-        .with_state(store);
+        .route("/market/prices", get(market_prices))
+        .with_state(state);
 
     let listener = TcpListener::bind("0.0.0.0:3000").await.unwrap();
     println!("listening on {}", listener.local_addr().unwrap());
@@ -55,6 +78,9 @@ mod tests {
     use super::*;
     use axum::http::{Request, StatusCode};
     use holdings::Order;
+    use market::{MarketData, QuoteFetcher};
+    use async_trait::async_trait;
+    use yahoo_finance_api::Quote;
     use tower::ServiceExt; // for `oneshot`
     use axum::body::to_bytes;
     use tempfile::tempdir;
@@ -78,11 +104,20 @@ mod tests {
     async fn test_add_and_list_orders() {
         let dir = tempdir().unwrap();
         let store = HoldingStore::new(dir.path().to_path_buf());
+        struct DummyFetcher;
+        #[async_trait]
+        impl QuoteFetcher for DummyFetcher {
+            async fn fetch_quotes(&self, _symbol: &str) -> anyhow::Result<Vec<Quote>> {
+                Ok(Vec::new())
+            }
+        }
+        let market = Arc::new(MarketData::new(Arc::new(DummyFetcher)));
+        let state = AppState { store: store.clone(), market };
         let app = Router::new()
             .route("/holdings/transaction", post(add_transaction))
             .route("/holdings/orders", get(list_orders))
             .route("/holdings/orders/:user", get(list_orders_for_user))
-            .with_state(store.clone());
+            .with_state(state);
 
         let order = OrderRequest { user: "alice".into(), symbol: "AAPL".into(), amount: 5, price: 10.0 };
         let response = app.clone()
@@ -137,9 +172,18 @@ mod tests {
         File::create(&file_path).unwrap();
 
         let store = HoldingStore::new(file_path);
+        struct DummyFetcher;
+        #[async_trait]
+        impl QuoteFetcher for DummyFetcher {
+            async fn fetch_quotes(&self, _symbol: &str) -> anyhow::Result<Vec<Quote>> {
+                Ok(Vec::new())
+            }
+        }
+        let market = Arc::new(MarketData::new(Arc::new(DummyFetcher)));
+        let state = AppState { store: store.clone(), market };
         let app = Router::new()
             .route("/holdings/transaction", post(add_transaction))
-            .with_state(store);
+            .with_state(state);
 
         let order = OrderRequest { user: "alice".into(), symbol: "AAPL".into(), amount: 5, price: 10.0 };
         let response = app
@@ -156,5 +200,40 @@ mod tests {
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let err: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert!(err["error"].as_str().unwrap().contains("failed to persist order"));
+    }
+
+    #[tokio::test]
+    async fn test_market_prices_endpoint() {
+        let dir = tempdir().unwrap();
+        let store = HoldingStore::new(dir.path().to_path_buf());
+        store
+            .add_order(Order { user: "alice".into(), symbol: "AAPL".into(), amount: 1, price: 1.0 })
+            .await
+            .unwrap();
+
+        struct MockFetcher;
+        #[async_trait]
+        impl QuoteFetcher for MockFetcher {
+            async fn fetch_quotes(&self, _symbol: &str) -> anyhow::Result<Vec<Quote>> {
+                Ok(vec![Quote { timestamp: 0, open: 10.0, high: 10.0, low: 10.0, volume: 0, close: 10.0, adjclose: 10.0 }])
+            }
+        }
+
+        let market = Arc::new(MarketData::new(Arc::new(MockFetcher)));
+        let state = AppState { store: store.clone(), market: market.clone() };
+        market.update(&store).await.unwrap();
+
+        let app = Router::new()
+            .route("/market/prices", get(market_prices))
+            .with_state(state);
+
+        let response = app
+            .oneshot(Request::builder().uri("/market/prices").body(axum::body::Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let prices: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(prices["AAPL"], 10.0);
     }
 }
