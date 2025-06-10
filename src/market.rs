@@ -1,5 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::path::PathBuf;
+
+use chrono::{DateTime, Utc};
 
 use axum::async_trait;
 use tokio::sync::RwLock;
@@ -11,6 +14,42 @@ use crate::holdings::HoldingStore;
 #[derive(Clone, Debug)]
 pub struct PriceInfo {
     pub history: Vec<Quote>,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct DailyClose {
+    pub date: String,
+    pub close: f64,
+}
+
+fn price_schema() -> arrow_schema::Schema {
+    use arrow_schema::{DataType, Field, Schema};
+    Schema::new(vec![
+        Field::new("date", DataType::Utf8, false),
+        Field::new("close", DataType::Float64, false),
+    ])
+}
+
+fn closes_to_record_batch(closes: &[DailyClose]) -> anyhow::Result<arrow_array::RecordBatch> {
+    use arrow_array::{Float64Array, RecordBatch, StringArray};
+    use std::sync::Arc as SyncArc;
+
+    let schema = SyncArc::new(price_schema());
+    let date_array = StringArray::from_iter_values(closes.iter().map(|c| c.date.as_str()));
+    let close_array = Float64Array::from_iter_values(closes.iter().map(|c| c.close));
+
+    Ok(RecordBatch::try_new(schema, vec![SyncArc::new(date_array), SyncArc::new(close_array)])?)
+}
+
+fn batch_to_closes(batch: &arrow_array::RecordBatch) -> Vec<DailyClose> {
+    use arrow_array::{Float64Array, StringArray};
+
+    let date_array = batch.column(0).as_any().downcast_ref::<StringArray>().unwrap();
+    let close_array = batch.column(1).as_any().downcast_ref::<Float64Array>().unwrap();
+
+    (0..batch.num_rows())
+        .map(|i| DailyClose { date: date_array.value(i).to_string(), close: close_array.value(i) })
+        .collect()
 }
 
 impl PriceInfo {
@@ -49,13 +88,59 @@ impl QuoteFetcher for YahooFetcher {
 pub struct MarketData {
     fetcher: Arc<dyn QuoteFetcher>,
     inner: Arc<RwLock<HashMap<String, PriceInfo>>>,
+    data_dir: PathBuf,
+    fs_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
-const UPDATE_INTERVAL_SECS: u64 = 30;
+const UPDATE_INTERVAL_SECS: u64 = 120;
 
 impl MarketData {
-    pub fn new(fetcher: Arc<dyn QuoteFetcher>) -> Self {
-        Self { fetcher, inner: Arc::new(RwLock::new(HashMap::new())) }
+    pub fn new(fetcher: Arc<dyn QuoteFetcher>, data_dir: PathBuf) -> Self {
+        Self {
+            fetcher,
+            inner: Arc::new(RwLock::new(HashMap::new())),
+            data_dir,
+            fs_lock: Arc::new(tokio::sync::Mutex::new(())),
+        }
+    }
+
+    async fn write_symbol_file(&self, symbol: &str, data: &[DailyClose]) -> anyhow::Result<()> {
+        use parquet::arrow::ArrowWriter;
+        use std::fs::{create_dir_all, File};
+
+        let _lock = self.fs_lock.lock().await;
+
+        let sym_dir = self.data_dir.join(symbol);
+        create_dir_all(&sym_dir)?;
+        let file_path = sym_dir.join("prices.parquet");
+
+        let batch = closes_to_record_batch(data)?;
+        let file = File::create(file_path)?;
+        let mut writer = ArrowWriter::try_new(file, batch.schema(), None)?;
+        writer.write(&batch)?;
+        writer.close()?;
+        Ok(())
+    }
+
+    async fn read_symbol_file(&self, symbol: &str) -> anyhow::Result<Vec<DailyClose>> {
+        use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+        use std::fs::File;
+
+        let file_path = self.data_dir.join(symbol).join("prices.parquet");
+        if !file_path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let _lock = self.fs_lock.lock().await;
+        let file = File::open(file_path)?;
+        let builder = ParquetRecordBatchReaderBuilder::try_new(file)?;
+        let mut reader = builder.build()?;
+        let mut prices = Vec::new();
+        while let Some(batch) = reader.next() {
+            let batch = batch?;
+            prices.extend(batch_to_closes(&batch));
+        }
+        Ok(prices)
     }
 
     /// Refresh quotes for all symbols held in `store`.
@@ -66,6 +151,18 @@ impl MarketData {
         let mut map = HashMap::new();
         for sym in symbols {
             let quotes = self.fetcher.fetch_quotes(&sym).await?;
+            if let Some(last) = quotes.last() {
+                let date = DateTime::<Utc>::from_timestamp(last.timestamp, 0)
+                    .expect("invalid timestamp")
+                    .date_naive()
+                    .to_string();
+                let close = last.close;
+                let mut history = self.read_symbol_file(&sym).await?;
+                if history.last().map(|h| h.date.as_str()) != Some(date.as_str()) {
+                    history.push(DailyClose { date: date.clone(), close });
+                    self.write_symbol_file(&sym, &history).await?;
+                }
+            }
             map.insert(sym, PriceInfo { history: quotes });
         }
 
@@ -120,6 +217,22 @@ mod tests {
         Quote { timestamp: 0, open: price, high: price, low: price, volume: 0, close: price, adjclose: price }
     }
 
+    struct SeqFetcher {
+        data: std::sync::Mutex<std::collections::VecDeque<Vec<Quote>>>,
+    }
+
+    #[async_trait]
+    impl QuoteFetcher for SeqFetcher {
+        async fn fetch_quotes(&self, _symbol: &str) -> anyhow::Result<Vec<Quote>> {
+            Ok(self
+                .data
+                .lock()
+                .unwrap()
+                .pop_front()
+                .unwrap_or_default())
+        }
+    }
+
     #[tokio::test]
     async fn test_update_prices() {
         let dir = tempdir().unwrap();
@@ -143,8 +256,8 @@ mod tests {
         quotes.insert("AAPL".into(), vec![sample_quote(10.0)]);
         quotes.insert("MSFT".into(), vec![sample_quote(20.0)]);
         let fetcher = Arc::new(MockFetcher { data: quotes });
-
-        let market = MarketData::new(fetcher);
+        let market_dir = dir.path().join("market");
+        let market = MarketData::new(fetcher, market_dir);
         market.update(&store).await.unwrap();
 
         let prices = market.prices().await;
@@ -154,5 +267,29 @@ mod tests {
         let mut symbols = market.symbols().await;
         symbols.sort();
         assert_eq!(symbols, vec!["AAPL", "MSFT"]);
+    }
+
+    #[tokio::test]
+    async fn test_persist_daily_closes() {
+        let dir = tempdir().unwrap();
+        let store = HoldingStore::new(dir.path().to_path_buf());
+        store
+            .add_order(Order { user: "alice".into(), symbol: "AAPL".into(), amount: 1, price: 1.0 })
+            .await
+            .unwrap();
+
+        let day1 = vec![Quote { timestamp: 0, open: 0.0, high: 0.0, low: 0.0, volume: 0, close: 10.0, adjclose: 10.0 }];
+        let day2 = vec![Quote { timestamp: 86_400, open: 0.0, high: 0.0, low: 0.0, volume: 0, close: 12.0, adjclose: 12.0 }];
+        let fetcher = Arc::new(SeqFetcher { data: std::sync::Mutex::new(std::collections::VecDeque::from(vec![day1, day2])) });
+        let market_dir = dir.path().join("market");
+        let market = MarketData::new(fetcher, market_dir.clone());
+
+        market.update(&store).await.unwrap();
+        market.update(&store).await.unwrap();
+
+        let history = market.read_symbol_file("AAPL").await.unwrap();
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].close, 10.0);
+        assert_eq!(history[1].close, 12.0);
     }
 }
