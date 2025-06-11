@@ -47,6 +47,12 @@ async fn market_prices(State(state): State<AppState>) -> impl IntoResponse {
     Json(prices)
 }
 
+async fn market_symbols(State(state): State<AppState>) -> impl IntoResponse {
+    let mut symbols = state.market.symbols().await;
+    symbols.sort();
+    Json(symbols)
+}
+
 #[tokio::main]
 async fn main() {
     let store = HoldingStore::new(PathBuf::from("data"));
@@ -63,6 +69,7 @@ async fn main() {
         .route("/holdings/orders", get(list_orders))
         .route("/holdings/orders/:user", get(list_orders_for_user))
         .route("/market/prices", get(market_prices))
+        .route("/market/symbols", get(market_symbols))
         .with_state(state);
 
     let listener = TcpListener::bind("0.0.0.0:3000").await.unwrap();
@@ -236,5 +243,41 @@ mod tests {
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let prices: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(prices["AAPL"], 10.0);
+    }
+
+    #[tokio::test]
+    async fn test_market_symbols_endpoint() {
+        let dir = tempdir().unwrap();
+        let store = HoldingStore::new(dir.path().to_path_buf());
+        store
+            .add_order(Order { user: "alice".into(), symbol: "AAPL".into(), amount: 1, price: 1.0 })
+            .await
+            .unwrap();
+
+        struct MockFetcher;
+        #[async_trait]
+        impl QuoteFetcher for MockFetcher {
+            async fn fetch_quotes(&self, _symbol: &str) -> anyhow::Result<Vec<Quote>> {
+                Ok(vec![Quote { timestamp: 0, open: 10.0, high: 10.0, low: 10.0, volume: 0, close: 10.0, adjclose: 10.0 }])
+            }
+        }
+
+        let market_dir = dir.path().join("market");
+        let market = Arc::new(MarketData::new(Arc::new(MockFetcher), market_dir));
+        let state = AppState { store: store.clone(), market: market.clone() };
+        market.update(&store).await.unwrap();
+
+        let app = Router::new()
+            .route("/market/symbols", get(market_symbols))
+            .with_state(state);
+
+        let response = app
+            .oneshot(Request::builder().uri("/market/symbols").body(axum::body::Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let symbols: Vec<String> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(symbols, vec!["AAPL"]);
     }
 }
