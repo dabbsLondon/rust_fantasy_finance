@@ -150,7 +150,17 @@ impl MarketData {
 
         let mut map = HashMap::new();
         for sym in symbols {
-            let quotes = self.fetcher.fetch_quotes(&sym).await?;
+            tracing::info!("fetching quotes for {sym}");
+            let quotes = match self.fetcher.fetch_quotes(&sym).await {
+                Ok(q) => {
+                    tracing::info!("received {} quotes for {sym}", q.len());
+                    q
+                }
+                Err(e) => {
+                    tracing::error!("failed to fetch quotes for {sym}: {e}");
+                    return Err(e);
+                }
+            };
             if let Some(last) = quotes.last() {
                 let date = DateTime::<Utc>::from_timestamp(last.timestamp, 0)
                     .expect("invalid timestamp")
@@ -190,7 +200,10 @@ impl MarketData {
     pub async fn run(self: Arc<Self>, store: HoldingStore) {
         use tokio::time::{sleep, Duration};
         loop {
-            let _ = self.update(&store).await;
+            tracing::info!("running market data update");
+            if let Err(e) = self.update(&store).await {
+                tracing::error!("market data update failed: {e}");
+            }
             sleep(Duration::from_secs(UPDATE_INTERVAL_SECS)).await;
         }
     }
