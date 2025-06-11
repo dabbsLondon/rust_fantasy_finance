@@ -11,6 +11,7 @@ use holdings::{HoldingStore, OrderRequest};
 use market::{MarketData, YahooFetcher};
 use error::AppError;
 use state::AppState;
+use tracing::info;
 
 
 async fn hello() -> impl IntoResponse {
@@ -49,6 +50,10 @@ async fn market_prices(State(state): State<AppState>) -> impl IntoResponse {
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
+
     let store = HoldingStore::new(PathBuf::from("data"));
     let fetcher = Arc::new(YahooFetcher::new().expect("failed to create fetcher"));
     let market = Arc::new(MarketData::new(fetcher, PathBuf::from("data/market")));
@@ -66,7 +71,7 @@ async fn main() {
         .with_state(state);
 
     let listener = TcpListener::bind("0.0.0.0:3000").await.unwrap();
-    println!("listening on {}", listener.local_addr().unwrap());
+    info!("listening on {}", listener.local_addr().unwrap());
     axum::serve(listener, app).await.unwrap();
 }
 
