@@ -45,3 +45,14 @@ impl From<crate::holdings::StoreError> for AppError {
         }
     }
 }
+
+impl From<crate::holdings_service::HoldingsError> for AppError {
+    fn from(err: crate::holdings_service::HoldingsError) -> Self {
+        match err {
+            crate::holdings_service::HoldingsError::NoHoldings(user) => {
+                AppError::not_found(format!("no holdings for user {user}"))
+            }
+            crate::holdings_service::HoldingsError::Other(e) => AppError::internal(e.to_string()),
+        }
+    }
+}
