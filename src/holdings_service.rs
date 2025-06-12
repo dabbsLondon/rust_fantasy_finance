@@ -7,7 +7,6 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::{Mutex, RwLock};
-use tracing::info;
 
 #[derive(Debug, Error)]
 pub enum HoldingsError {
@@ -113,7 +112,7 @@ impl HoldingsService {
                     && r.updated_at == record.updated_at
             }) {
                 existing.current_price = record.current_price;
-                info!(
+                tracing::info!(
                     user = %record.user,
                     symbol = %record.symbol,
                     price = record.current_price,
@@ -121,7 +120,7 @@ impl HoldingsService {
                 );
             } else {
                 recs.push(record.clone());
-                info!(
+                tracing::info!(
                     user = %record.user,
                     symbol = %record.symbol,
                     quantity = record.quantity,
@@ -224,7 +223,7 @@ impl HoldingsService {
                         updated_at: date,
                     };
                     self.add_or_update(record).await?;
-                    info!(user = %order.user, symbol = %order.symbol, "holdings updated from market");
+                    tracing::info!(user = %order.user, symbol = %order.symbol, "holdings updated from market");
                 }
             }
         }

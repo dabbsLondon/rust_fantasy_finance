@@ -8,7 +8,6 @@ use axum::{routing::{get, post}, Router, response::IntoResponse, extract::{Path,
 use tokio::net::TcpListener;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tracing::info;
 use holdings::{HoldingStore, OrderRequest};
 use holdings_service::HoldingsService;
 use market::{MarketData, YahooFetcher};
@@ -64,7 +63,7 @@ async fn list_holdings(
 }
 
 async fn market_prices(State(state): State<AppState>) -> impl IntoResponse {
-    let prices = state.market.prices().await;
+    tracing::info!("listening on {}", listener.local_addr().unwrap());
     Json(prices)
 }
 
