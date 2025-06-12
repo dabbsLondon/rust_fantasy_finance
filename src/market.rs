@@ -143,10 +143,14 @@ impl MarketData {
         Ok(prices)
     }
 
-    /// Refresh quotes for all symbols held in `store`.
-    pub async fn update(&self, store: &HoldingStore) -> anyhow::Result<()> {
+    /// Refresh quotes for all symbols held in `store` and record holdings.
+    pub async fn update(
+        &self,
+        store: &HoldingStore,
+        holdings: &crate::portfolio::HoldingsService,
+    ) -> anyhow::Result<()> {
         let orders = store.all_orders().await;
-        let symbols: HashSet<_> = orders.into_iter().map(|o| o.symbol).collect();
+        let symbols: HashSet<_> = orders.iter().map(|o| o.symbol.clone()).collect();
 
         let mut map = HashMap::new();
         for sym in symbols {
@@ -177,7 +181,19 @@ impl MarketData {
         }
 
         let mut guard = self.inner.write().await;
-        *guard = map;
+        *guard = map.clone();
+        drop(guard);
+
+        let now = Utc::now();
+        let price_map: HashMap<_, _> = map
+            .iter()
+            .filter_map(|(s, info)| info.latest_price().map(|p| (s.clone(), p)))
+            .collect();
+        for order in orders {
+            if let Some(price) = price_map.get(&order.symbol) {
+                holdings.record(&order, *price, now).await;
+            }
+        }
         Ok(())
     }
 
@@ -197,11 +213,15 @@ impl MarketData {
     }
 
     /// Run a loop updating quotes periodically.
-    pub async fn run(self: Arc<Self>, store: HoldingStore) {
+    pub async fn run(
+        self: Arc<Self>,
+        store: HoldingStore,
+        holdings: crate::portfolio::HoldingsService,
+    ) {
         use tokio::time::{sleep, Duration};
         loop {
             tracing::info!("running market data update");
-            if let Err(e) = self.update(&store).await {
+            if let Err(e) = self.update(&store, &holdings).await {
                 tracing::error!("market data update failed: {e}");
             }
             sleep(Duration::from_secs(UPDATE_INTERVAL_SECS)).await;
@@ -271,7 +291,8 @@ mod tests {
         let fetcher = Arc::new(MockFetcher { data: quotes });
         let market_dir = dir.path().join("market");
         let market = MarketData::new(fetcher, market_dir);
-        market.update(&store).await.unwrap();
+        let holdings = crate::portfolio::HoldingsService::new();
+        market.update(&store, &holdings).await.unwrap();
 
         let prices = market.prices().await;
         assert_eq!(prices.get("AAPL"), Some(&10.0));
@@ -296,9 +317,10 @@ mod tests {
         let fetcher = Arc::new(SeqFetcher { data: std::sync::Mutex::new(std::collections::VecDeque::from(vec![day1, day2])) });
         let market_dir = dir.path().join("market");
         let market = MarketData::new(fetcher, market_dir.clone());
+        let holdings = crate::portfolio::HoldingsService::new();
 
-        market.update(&store).await.unwrap();
-        market.update(&store).await.unwrap();
+        market.update(&store, &holdings).await.unwrap();
+        market.update(&store, &holdings).await.unwrap();
 
         let history = market.read_symbol_file("AAPL").await.unwrap();
         assert_eq!(history.len(), 2);
