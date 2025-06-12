@@ -7,6 +7,8 @@ This project is a minimal REST API built with [Axum](https://github.com/tokio-rs
 - `POST /holdings/transaction` – add a transaction in JSON with `user`, `symbol`, `amount` and `price`.
 - `GET /holdings/orders` – list all recorded transactions.
 - `GET /holdings/orders/<user>` – list transactions for a specific user. Returns `404` if the user has no orders stored.
+- `GET /holdings` – list current holdings for all users.
+- `GET /holdings/<user>` – list holdings for a specific user.
 - `GET /market/prices` – current price for each symbol held by any user.
 - `GET /market/symbols` – list of all symbols currently tracked.
 
@@ -24,6 +26,10 @@ curl -X POST http://localhost:3000/holdings/transaction \
 curl http://localhost:3000/holdings/orders
 
 curl http://localhost:3000/holdings/orders/alice
+
+curl http://localhost:3000/holdings
+
+curl http://localhost:3000/holdings/alice
 ```
 
 ## Running locally

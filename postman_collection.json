@@ -63,6 +63,32 @@
       }
     },
     {
+      "name": "List holdings",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "http://localhost:3000/holdings",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "3000",
+          "path": ["holdings"]
+        }
+      }
+    },
+    {
+      "name": "List holdings for user",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "http://localhost:3000/holdings/alice",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "3000",
+          "path": ["holdings", "alice"]
+        }
+      }
+    },
+    {
       "name": "Market prices",
       "request": {
         "method": "GET",
