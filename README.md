@@ -7,10 +7,12 @@ This project is a minimal REST API built with [Axum](https://github.com/tokio-rs
 - `POST /holdings/transaction` – add a transaction in JSON with `user`, `symbol`, `amount` and `price`.
 - `GET /holdings/orders` – list all recorded transactions.
 - `GET /holdings/orders/<user>` – list transactions for a specific user. Returns `404` if the user has no orders stored.
+- `GET /holdings` – list holdings. Accepts optional `user` query parameter to filter by user.
 - `GET /market/prices` – current price for each symbol held by any user.
 
 Transactions are kept in memory and flushed to Parquet files under `data/<user>/orders.parquet`.
 Market prices are periodically fetched from Yahoo Finance for all symbols found in those orders and served via `/market/prices`. Closing prices are stored under `data/market/<symbol>/prices.parquet` and refreshed every two minutes.
+Holdings are updated at the same time, recording the latest price for each user order.
 
 #### Example requests
 
@@ -22,6 +24,8 @@ curl -X POST http://localhost:3000/holdings/transaction \
 curl http://localhost:3000/holdings/orders
 
 curl http://localhost:3000/holdings/orders/alice
+
+curl http://localhost:3000/holdings?user=alice
 ```
 
 ## Running locally
@@ -30,7 +34,7 @@ curl http://localhost:3000/holdings/orders/alice
 cargo run
 ```
 
-The server listens on port `3000`.
+The server listens on port `3000` and logs to stdout using the `tracing` crate.
 
 ## Testing
 

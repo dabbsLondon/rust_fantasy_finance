@@ -2,12 +2,14 @@ mod holdings;
 mod error;
 mod market;
 mod state;
+mod holdings_service;
 
 use axum::{routing::{get, post}, Router, response::IntoResponse, extract::{Path, State}, Json};
 use tokio::net::TcpListener;
 use std::path::PathBuf;
 use std::sync::Arc;
 use holdings::{HoldingStore, OrderRequest};
+use holdings_service::HoldingsService;
 use market::{MarketData, YahooFetcher};
 use error::AppError;
 use state::AppState;
@@ -42,6 +44,23 @@ async fn list_orders_for_user(
     Ok(Json(orders).into_response())
 }
 
+#[derive(serde::Deserialize)]
+struct HoldingsQuery {
+    user: Option<String>,
+}
+
+async fn list_holdings(
+    State(state): State<AppState>,
+    axum::extract::Query(query): axum::extract::Query<HoldingsQuery>,
+) -> Result<impl IntoResponse, AppError> {
+    let records = if let Some(user) = query.user {
+        state.holdings.holdings_for_user(&user).await?
+    } else {
+        state.holdings.all_holdings().await
+    };
+    Ok(Json(records))
+}
+
 async fn market_prices(State(state): State<AppState>) -> impl IntoResponse {
     let prices = state.market.prices().await;
     Json(prices)
@@ -49,24 +68,27 @@ async fn market_prices(State(state): State<AppState>) -> impl IntoResponse {
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt::init();
     let store = HoldingStore::new(PathBuf::from("data"));
+    let holdings_service = HoldingsService::new(PathBuf::from("data"));
     let fetcher = Arc::new(YahooFetcher::new().expect("failed to create fetcher"));
     let market = Arc::new(MarketData::new(fetcher, PathBuf::from("data/market")));
 
-    let state = AppState { store: store.clone(), market: market.clone() };
+    let state = AppState { store: store.clone(), market: market.clone(), holdings: holdings_service.clone() };
 
-    tokio::spawn(market.clone().run(store.clone()));
+    tokio::spawn(market.clone().run(store.clone(), holdings_service.clone()));
 
     let app = Router::new()
         .route("/", get(hello))
         .route("/holdings/transaction", post(add_transaction))
         .route("/holdings/orders", get(list_orders))
         .route("/holdings/orders/:user", get(list_orders_for_user))
+        .route("/holdings", get(list_holdings))
         .route("/market/prices", get(market_prices))
         .with_state(state);
 
     let listener = TcpListener::bind("0.0.0.0:3000").await.unwrap();
-    println!("listening on {}", listener.local_addr().unwrap());
+    tracing::info!("listening on {}", listener.local_addr().unwrap());
     axum::serve(listener, app).await.unwrap();
 }
 
@@ -75,6 +97,7 @@ mod tests {
     use super::*;
     use axum::http::{Request, StatusCode};
     use holdings::Order;
+    use holdings_service::HoldingsService;
     use market::{MarketData, QuoteFetcher};
     use state::AppState;
     use async_trait::async_trait;
@@ -111,7 +134,8 @@ mod tests {
         }
         let market_dir = dir.path().join("market");
         let market = Arc::new(MarketData::new(Arc::new(DummyFetcher), market_dir));
-        let state = AppState { store: store.clone(), market };
+        let holdings = HoldingsService::new(dir.path().to_path_buf());
+        let state = AppState { store: store.clone(), market, holdings: holdings.clone() };
         let app = Router::new()
             .route("/holdings/transaction", post(add_transaction))
             .route("/holdings/orders", get(list_orders))
@@ -180,7 +204,8 @@ mod tests {
         }
         let market_dir = dir.path().join("market");
         let market = Arc::new(MarketData::new(Arc::new(DummyFetcher), market_dir));
-        let state = AppState { store: store.clone(), market };
+        let holdings = HoldingsService::new(dir.path().to_path_buf());
+        let state = AppState { store: store.clone(), market, holdings: holdings.clone() };
         let app = Router::new()
             .route("/holdings/transaction", post(add_transaction))
             .with_state(state);
@@ -221,8 +246,9 @@ mod tests {
 
         let market_dir = dir.path().join("market");
         let market = Arc::new(MarketData::new(Arc::new(MockFetcher), market_dir));
-        let state = AppState { store: store.clone(), market: market.clone() };
-        market.update(&store).await.unwrap();
+        let holdings = HoldingsService::new(dir.path().to_path_buf());
+        let state = AppState { store: store.clone(), market: market.clone(), holdings: holdings.clone() };
+        market.update(&store, &holdings).await.unwrap();
 
         let app = Router::new()
             .route("/market/prices", get(market_prices))
@@ -236,5 +262,42 @@ mod tests {
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let prices: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(prices["AAPL"], 10.0);
+    }
+
+    #[tokio::test]
+    async fn test_holdings_endpoint() {
+        let dir = tempdir().unwrap();
+        let store = HoldingStore::new(dir.path().to_path_buf());
+        let holdings = HoldingsService::new(dir.path().to_path_buf());
+        store
+            .add_order(Order { user: "alice".into(), symbol: "AAPL".into(), amount: 1, price: 1.0 })
+            .await
+            .unwrap();
+
+        struct MockFetcher;
+        #[async_trait]
+        impl QuoteFetcher for MockFetcher {
+            async fn fetch_quotes(&self, _symbol: &str) -> anyhow::Result<Vec<Quote>> {
+                Ok(vec![Quote { timestamp: 0, open: 10.0, high: 10.0, low: 10.0, volume: 0, close: 10.0, adjclose: 10.0 }])
+            }
+        }
+
+        let market_dir = dir.path().join("market");
+        let market = Arc::new(MarketData::new(Arc::new(MockFetcher), market_dir));
+        let state = AppState { store: store.clone(), market: market.clone(), holdings: holdings.clone() };
+        market.update(&store, &holdings).await.unwrap();
+
+        let app = Router::new()
+            .route("/holdings", get(list_holdings))
+            .with_state(state);
+
+        let response = app
+            .oneshot(Request::builder().uri("/holdings?user=alice").body(axum::body::Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let recs: Vec<crate::holdings_service::HoldingRecord> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(recs.len(), 1);
     }
 }
