@@ -8,6 +8,7 @@ use axum::{routing::{get, post}, Router, response::IntoResponse, extract::{Path,
 use tokio::net::TcpListener;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::collections::HashMap;
 use holdings::{HoldingStore, OrderRequest};
 use market::{MarketData, YahooFetcher};
 use error::AppError;
@@ -58,12 +59,12 @@ async fn list_holdings_for_user(
     Json(holdings)
 }
 
-async fn market_prices(State(state): State<AppState>) -> impl IntoResponse {
+async fn market_prices(State(state): State<AppState>) -> Json<HashMap<String, f64>> {
     let prices = state.market.prices().await;
     Json(prices)
 }
 
-async fn market_symbols(State(state): State<AppState>) -> impl IntoResponse {
+async fn market_symbols(State(state): State<AppState>) -> Json<Vec<String>> {
     let mut symbols = state.market.symbols().await;
     symbols.sort();
     Json(symbols)
