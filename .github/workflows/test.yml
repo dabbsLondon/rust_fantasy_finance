@@ -3,6 +3,8 @@ name: CI
 on:
   push:
     branches: ["**"]
+  pull_request:
+    branches: ["**"]
 
 jobs:
   test:
@@ -14,7 +16,9 @@ jobs:
           toolchain: stable
           override: true
       - name: Run tests
-        run: cargo test --verbose | tee test.log
+        run: cargo test --all-targets --verbose | tee test.log
+      - name: Ensure release build
+        run: cargo build --release
       - name: Test summary
         if: always()
         run: |
