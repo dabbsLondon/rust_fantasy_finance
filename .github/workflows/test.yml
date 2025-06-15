@@ -19,6 +19,13 @@ jobs:
         run: cargo test --all-targets --verbose | tee test.log
       - name: Ensure release build
         run: cargo build --release
+      - name: Run server briefly
+        run: |
+          cargo run --quiet &
+          pid=$!
+          sleep 10
+          kill $pid
+          wait $pid || [ $? -eq 143 ]
       - name: Test summary
         if: always()
         run: |

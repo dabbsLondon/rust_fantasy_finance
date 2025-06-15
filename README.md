@@ -76,7 +76,7 @@ docker run --rm -p 3000:3000 --platform linux/amd64 \
 
 Two workflows are provided:
 
- - **test.yml** – runs `cargo test --all-targets` and a release build on every push and pull request.
+ - **test.yml** – runs `cargo test --all-targets`, a release build, and starts the server for 10 seconds on every push and pull request.
 - **docker.yml** – builds and publishes a versioned image to GitHub Container Registry. Tags include the short commit SHA to avoid collisions. Main branch builds automatically bump the minor version while other branches keep the version from `Cargo.toml` and append the branch name. Examples: `0.1.1-abc123` for main or `0.1.0_feature-abc123` for a branch.
 
 The tagging logic lives in a reusable composite action at `.github/actions/version`.
