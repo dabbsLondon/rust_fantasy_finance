@@ -3,6 +3,7 @@ mod error;
 mod market;
 mod state;
 mod portfolio;
+mod activity;
 
 use axum::{routing::{get, post}, Router, response::IntoResponse, extract::{Path, State}, Json};
 use tokio::net::TcpListener;
@@ -14,6 +15,7 @@ use market::{MarketData, YahooFetcher};
 use error::AppError;
 use state::AppState;
 use portfolio::HoldingsService;
+use activity::{ActivityStore, Activity};
 use tracing::info;
 
 
@@ -70,6 +72,16 @@ async fn market_symbols(State(state): State<AppState>) -> Json<Vec<String>> {
     Json(symbols)
 }
 
+async fn get_activity(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    match state.activities.get(&id).await {
+        Some(act) => Ok(Json(act)),
+        None => Err(AppError::not_found(format!("no activity with id {id}"))),
+    }
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
@@ -80,8 +92,19 @@ async fn main() {
     let fetcher = Arc::new(YahooFetcher::new().expect("failed to create fetcher"));
     let market = Arc::new(MarketData::new(fetcher, PathBuf::from("data/market")));
     let holdings = HoldingsService::new();
+    let activities = ActivityStore::new();
 
-    let state = AppState { store: store.clone(), market: market.clone(), holdings: holdings.clone() };
+    // seed sample activity for demo purposes
+    activities
+        .add(Activity {
+            id: "1".into(),
+            metadata: "demo activity".into(),
+            heart_rate: vec![60, 65, 70],
+            gps: vec![activity::GpsPoint { lat: 0.0, lon: 0.0 }],
+        })
+        .await;
+
+    let state = AppState { store: store.clone(), market: market.clone(), holdings: holdings.clone(), activities: activities.clone() };
 
     tokio::spawn(market.clone().run(store.clone(), holdings.clone()));
 
@@ -94,6 +117,7 @@ async fn main() {
         .route("/holdings/:user", get(list_holdings_for_user))
         .route("/market/prices", get(market_prices))
         .route("/market/symbols", get(market_symbols))
+        .route("/activities/:id", get(get_activity))
         .with_state(state);
 
     let listener = TcpListener::bind("0.0.0.0:3000").await.unwrap();
@@ -143,7 +167,7 @@ mod tests {
         let market_dir = dir.path().join("market");
         let market = Arc::new(MarketData::new(Arc::new(DummyFetcher), market_dir));
         let holdings = HoldingsService::new();
-        let state = AppState { store: store.clone(), market, holdings: holdings.clone() };
+        let state = AppState { store: store.clone(), market, holdings: holdings.clone(), activities: ActivityStore::new() };
         let app = Router::new()
             .route("/holdings/transaction", post(add_transaction))
             .route("/holdings/orders", get(list_orders))
@@ -213,7 +237,7 @@ mod tests {
         let market_dir = dir.path().join("market");
         let market = Arc::new(MarketData::new(Arc::new(DummyFetcher), market_dir));
         let holdings = HoldingsService::new();
-        let state = AppState { store: store.clone(), market, holdings: holdings.clone() };
+        let state = AppState { store: store.clone(), market, holdings: holdings.clone(), activities: ActivityStore::new() };
         let app = Router::new()
             .route("/holdings/transaction", post(add_transaction))
             .with_state(state);
@@ -255,7 +279,7 @@ mod tests {
         let market_dir = dir.path().join("market");
         let market = Arc::new(MarketData::new(Arc::new(MockFetcher), market_dir));
         let holdings = HoldingsService::new();
-        let state = AppState { store: store.clone(), market: market.clone(), holdings: holdings.clone() };
+        let state = AppState { store: store.clone(), market: market.clone(), holdings: holdings.clone(), activities: ActivityStore::new() };
         market.update(&store, &holdings).await.unwrap();
 
         let app = Router::new()
@@ -292,7 +316,7 @@ mod tests {
         let market_dir = dir.path().join("market");
         let market = Arc::new(MarketData::new(Arc::new(MockFetcher), market_dir));
         let holdings = HoldingsService::new();
-        let state = AppState { store: store.clone(), market: market.clone(), holdings: holdings.clone() };
+        let state = AppState { store: store.clone(), market: market.clone(), holdings: holdings.clone(), activities: ActivityStore::new() };
         market.update(&store, &holdings).await.unwrap();
 
         let app = Router::new()
@@ -329,7 +353,7 @@ mod tests {
         let market_dir = dir.path().join("market");
         let market = Arc::new(MarketData::new(Arc::new(MockFetcher), market_dir));
         let holdings = HoldingsService::new();
-        let state = AppState { store: store.clone(), market: market.clone(), holdings: holdings.clone() };
+        let state = AppState { store: store.clone(), market: market.clone(), holdings: holdings.clone(), activities: ActivityStore::new() };
         market.update(&store, &holdings).await.unwrap();
 
         let app = Router::new()
@@ -356,5 +380,43 @@ mod tests {
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let all: Vec<crate::portfolio::Holding> = serde_json::from_slice(&body).unwrap();
         assert_eq!(all.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_get_activity_endpoint() {
+        let store = ActivityStore::new();
+        store
+            .add(Activity {
+                id: "123".into(),
+                metadata: "demo".into(),
+                heart_rate: vec![1, 2, 3],
+                gps: vec![activity::GpsPoint { lat: 0.0, lon: 0.0 }],
+            })
+            .await;
+        struct NoopFetcher;
+        #[async_trait]
+        impl QuoteFetcher for NoopFetcher {
+            async fn fetch_quotes(&self, _symbol: &str) -> anyhow::Result<Vec<Quote>> {
+                Ok(Vec::new())
+            }
+        }
+        let state = AppState {
+            store: HoldingStore::new(std::path::PathBuf::from("/tmp")),
+            market: Arc::new(MarketData::new(Arc::new(NoopFetcher), std::path::PathBuf::from("/tmp"))),
+            holdings: HoldingsService::new(),
+            activities: store.clone(),
+        };
+        let app = Router::new()
+            .route("/activities/:id", get(get_activity))
+            .with_state(state);
+
+        let response = app
+            .oneshot(Request::builder().uri("/activities/123").body(axum::body::Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let act: Activity = serde_json::from_slice(&body).unwrap();
+        assert_eq!(act.id, "123");
     }
 }

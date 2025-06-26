@@ -11,7 +11,9 @@
         "url": {
           "raw": "http://localhost:3000/",
           "protocol": "http",
-          "host": ["localhost"],
+          "host": [
+            "localhost"
+          ],
           "port": "3000"
         }
       }
@@ -21,7 +23,10 @@
       "request": {
         "method": "POST",
         "header": [
-          {"key": "Content-Type", "value": "application/json"}
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
         ],
         "body": {
           "mode": "raw",
@@ -30,9 +35,14 @@
         "url": {
           "raw": "http://localhost:3000/holdings/transaction",
           "protocol": "http",
-          "host": ["localhost"],
+          "host": [
+            "localhost"
+          ],
           "port": "3000",
-          "path": ["holdings", "transaction"]
+          "path": [
+            "holdings",
+            "transaction"
+          ]
         }
       }
     },
@@ -43,9 +53,14 @@
         "url": {
           "raw": "http://localhost:3000/holdings/orders",
           "protocol": "http",
-          "host": ["localhost"],
+          "host": [
+            "localhost"
+          ],
           "port": "3000",
-          "path": ["holdings", "orders"]
+          "path": [
+            "holdings",
+            "orders"
+          ]
         }
       }
     },
@@ -56,9 +71,15 @@
         "url": {
           "raw": "http://localhost:3000/holdings/orders/alice",
           "protocol": "http",
-          "host": ["localhost"],
+          "host": [
+            "localhost"
+          ],
           "port": "3000",
-          "path": ["holdings", "orders", "alice"]
+          "path": [
+            "holdings",
+            "orders",
+            "alice"
+          ]
         }
       }
     },
@@ -69,9 +90,13 @@
         "url": {
           "raw": "http://localhost:3000/holdings",
           "protocol": "http",
-          "host": ["localhost"],
+          "host": [
+            "localhost"
+          ],
           "port": "3000",
-          "path": ["holdings"]
+          "path": [
+            "holdings"
+          ]
         }
       }
     },
@@ -82,9 +107,14 @@
         "url": {
           "raw": "http://localhost:3000/holdings/alice",
           "protocol": "http",
-          "host": ["localhost"],
+          "host": [
+            "localhost"
+          ],
           "port": "3000",
-          "path": ["holdings", "alice"]
+          "path": [
+            "holdings",
+            "alice"
+          ]
         }
       }
     },
@@ -95,9 +125,14 @@
         "url": {
           "raw": "http://localhost:3000/market/prices",
           "protocol": "http",
-          "host": ["localhost"],
+          "host": [
+            "localhost"
+          ],
           "port": "3000",
-          "path": ["market", "prices"]
+          "path": [
+            "market",
+            "prices"
+          ]
         }
       }
     },
@@ -108,9 +143,32 @@
         "url": {
           "raw": "http://localhost:3000/market/symbols",
           "protocol": "http",
-          "host": ["localhost"],
+          "host": [
+            "localhost"
+          ],
           "port": "3000",
-          "path": ["market", "symbols"]
+          "path": [
+            "market",
+            "symbols"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get activity",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "http://localhost:3000/activities/1",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "3000",
+          "path": [
+            "activities",
+            "1"
+          ]
         }
       }
     }

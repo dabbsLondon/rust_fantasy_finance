@@ -10,7 +10,7 @@
 
  - The service exposes `POST /holdings/transaction`, `GET /holdings/orders`,
    `GET /holdings/orders/<user>`, `GET /holdings`, `GET /holdings/<user>`,
-   `GET /market/prices`, and `GET /market/symbols`. Transactions are stored in memory and
+  `GET /market/prices`, `GET /market/symbols`, and `GET /activities/<id>`. Transactions are stored in memory and
   persisted to Parquet files under `data/<user>/orders.parquet`. Market data is refreshed every two
   minutes and daily closes are appended to `data/market/<symbol>/prices.parquet`.
   Tests should avoid relying on network access and use temporary directories when touching
