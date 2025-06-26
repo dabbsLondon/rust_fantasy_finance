@@ -3,6 +3,8 @@ mod error;
 mod market;
 mod state;
 mod portfolio;
+mod strava;
+mod activities;
 
 use axum::{routing::{get, post}, Router, response::IntoResponse, extract::{Path, State}, Json};
 use tokio::net::TcpListener;
@@ -11,6 +13,8 @@ use std::sync::Arc;
 use std::collections::HashMap;
 use holdings::{HoldingStore, OrderRequest};
 use market::{MarketData, YahooFetcher};
+use strava::StravaClient;
+use activities::ActivityStore;
 use error::AppError;
 use state::AppState;
 use portfolio::HoldingsService;
@@ -70,6 +74,44 @@ async fn market_symbols(State(state): State<AppState>) -> Json<Vec<String>> {
     Json(symbols)
 }
 
+async fn strava_segment(
+    Path(id): Path<u64>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    state
+        .strava
+        .fetch_segment(id)
+        .await
+        .map(Json)
+        .map_err(|e| AppError::internal(e.to_string()))
+}
+
+async fn download_activity(
+    Path(id): Path<u64>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    if let Some(existing) = state.activities.get(id).await {
+        if existing.average_heartrate.is_some()
+            && existing.max_heartrate.is_some()
+            && !existing.segments.is_empty()
+        {
+            return Ok(Json(existing));
+        }
+    }
+
+    let fetched = state
+        .strava
+        .fetch_activity(id)
+        .await
+        .map_err(|e| AppError::internal(e.to_string()))?;
+    let merged = state
+        .activities
+        .merge(fetched)
+        .await
+        .map_err(|e| AppError::internal(e.to_string()))?;
+    Ok(Json(merged))
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
@@ -80,8 +122,17 @@ async fn main() {
     let fetcher = Arc::new(YahooFetcher::new().expect("failed to create fetcher"));
     let market = Arc::new(MarketData::new(fetcher, PathBuf::from("data/market")));
     let holdings = HoldingsService::new();
+    let strava_token = std::env::var("STRAVA_ACCESS_TOKEN").unwrap_or_default();
+    let strava_client = Arc::new(StravaClient::new(strava_token));
+    let activities = ActivityStore::new(PathBuf::from("data/activities"));
 
-    let state = AppState { store: store.clone(), market: market.clone(), holdings: holdings.clone() };
+    let state = AppState {
+        store: store.clone(),
+        market: market.clone(),
+        holdings: holdings.clone(),
+        strava: strava_client.clone(),
+        activities: activities.clone(),
+    };
 
     tokio::spawn(market.clone().run(store.clone(), holdings.clone()));
 
@@ -94,6 +145,8 @@ async fn main() {
         .route("/holdings/:user", get(list_holdings_for_user))
         .route("/market/prices", get(market_prices))
         .route("/market/symbols", get(market_symbols))
+        .route("/strava/segment/:id", get(strava_segment))
+        .route("/strava/activity/:id", get(download_activity))
         .with_state(state);
 
     let listener = TcpListener::bind("0.0.0.0:3000").await.unwrap();
@@ -108,11 +161,14 @@ mod tests {
     use holdings::Order;
     use market::{MarketData, QuoteFetcher};
     use state::AppState;
+    use crate::strava::{self, SegmentFetcher, ActivityFetcher};
+    use crate::activities::ActivityStore;
     use async_trait::async_trait;
     use yahoo_finance_api::Quote;
     use tower::ServiceExt; // for `oneshot`
     use axum::body::to_bytes;
     use tempfile::tempdir;
+    use tokio::sync::Mutex;
 
     #[tokio::test]
     async fn test_hello() {
@@ -143,7 +199,32 @@ mod tests {
         let market_dir = dir.path().join("market");
         let market = Arc::new(MarketData::new(Arc::new(DummyFetcher), market_dir));
         let holdings = HoldingsService::new();
-        let state = AppState { store: store.clone(), market, holdings: holdings.clone() };
+        struct DummySeg;
+        #[async_trait]
+        impl SegmentFetcher for DummySeg {
+            async fn fetch_segment(&self, id: u64) -> anyhow::Result<strava::Segment> {
+                Ok(strava::Segment { id, name: "seg".into(), distance: 1.0, average_grade: 1.0 })
+            }
+        }
+        #[async_trait]
+        impl ActivityFetcher for DummySeg {
+            async fn fetch_activity(&self, id: u64) -> anyhow::Result<strava::Activity> {
+                Ok(strava::Activity {
+                    id,
+                    name: "act".into(),
+                    segments: Vec::new(),
+                    average_heartrate: None,
+                    max_heartrate: None,
+                })
+            }
+        }
+        let state = AppState {
+            store: store.clone(),
+            market,
+            holdings: holdings.clone(),
+            strava: Arc::new(DummySeg),
+            activities: ActivityStore::new(dir.path().join("acts")),
+        };
         let app = Router::new()
             .route("/holdings/transaction", post(add_transaction))
             .route("/holdings/orders", get(list_orders))
@@ -213,7 +294,32 @@ mod tests {
         let market_dir = dir.path().join("market");
         let market = Arc::new(MarketData::new(Arc::new(DummyFetcher), market_dir));
         let holdings = HoldingsService::new();
-        let state = AppState { store: store.clone(), market, holdings: holdings.clone() };
+        struct DummySeg;
+        #[async_trait]
+        impl SegmentFetcher for DummySeg {
+            async fn fetch_segment(&self, id: u64) -> anyhow::Result<strava::Segment> {
+                Ok(strava::Segment { id, name: "seg".into(), distance: 1.0, average_grade: 1.0 })
+            }
+        }
+        #[async_trait]
+        impl ActivityFetcher for DummySeg {
+            async fn fetch_activity(&self, id: u64) -> anyhow::Result<strava::Activity> {
+                Ok(strava::Activity {
+                    id,
+                    name: "act".into(),
+                    segments: Vec::new(),
+                    average_heartrate: None,
+                    max_heartrate: None,
+                })
+            }
+        }
+        let state = AppState {
+            store: store.clone(),
+            market,
+            holdings: holdings.clone(),
+            strava: Arc::new(DummySeg),
+            activities: ActivityStore::new(dir.path().join("acts")),
+        };
         let app = Router::new()
             .route("/holdings/transaction", post(add_transaction))
             .with_state(state);
@@ -255,7 +361,32 @@ mod tests {
         let market_dir = dir.path().join("market");
         let market = Arc::new(MarketData::new(Arc::new(MockFetcher), market_dir));
         let holdings = HoldingsService::new();
-        let state = AppState { store: store.clone(), market: market.clone(), holdings: holdings.clone() };
+        struct DummySeg;
+        #[async_trait]
+        impl SegmentFetcher for DummySeg {
+            async fn fetch_segment(&self, id: u64) -> anyhow::Result<strava::Segment> {
+                Ok(strava::Segment { id, name: "seg".into(), distance: 1.0, average_grade: 1.0 })
+            }
+        }
+        #[async_trait]
+        impl ActivityFetcher for DummySeg {
+            async fn fetch_activity(&self, id: u64) -> anyhow::Result<strava::Activity> {
+                Ok(strava::Activity {
+                    id,
+                    name: "act".into(),
+                    segments: Vec::new(),
+                    average_heartrate: None,
+                    max_heartrate: None,
+                })
+            }
+        }
+        let state = AppState {
+            store: store.clone(),
+            market: market.clone(),
+            holdings: holdings.clone(),
+            strava: Arc::new(DummySeg),
+            activities: ActivityStore::new(dir.path().join("acts")),
+        };
         market.update(&store, &holdings).await.unwrap();
 
         let app = Router::new()
@@ -292,7 +423,32 @@ mod tests {
         let market_dir = dir.path().join("market");
         let market = Arc::new(MarketData::new(Arc::new(MockFetcher), market_dir));
         let holdings = HoldingsService::new();
-        let state = AppState { store: store.clone(), market: market.clone(), holdings: holdings.clone() };
+        struct DummySeg;
+        #[async_trait]
+        impl SegmentFetcher for DummySeg {
+            async fn fetch_segment(&self, id: u64) -> anyhow::Result<strava::Segment> {
+                Ok(strava::Segment { id, name: "seg".into(), distance: 1.0, average_grade: 1.0 })
+            }
+        }
+        #[async_trait]
+        impl ActivityFetcher for DummySeg {
+            async fn fetch_activity(&self, id: u64) -> anyhow::Result<strava::Activity> {
+                Ok(strava::Activity {
+                    id,
+                    name: "act".into(),
+                    segments: Vec::new(),
+                    average_heartrate: None,
+                    max_heartrate: None,
+                })
+            }
+        }
+        let state = AppState {
+            store: store.clone(),
+            market: market.clone(),
+            holdings: holdings.clone(),
+            strava: Arc::new(DummySeg),
+            activities: ActivityStore::new(dir.path().join("acts")),
+        };
         market.update(&store, &holdings).await.unwrap();
 
         let app = Router::new()
@@ -329,7 +485,32 @@ mod tests {
         let market_dir = dir.path().join("market");
         let market = Arc::new(MarketData::new(Arc::new(MockFetcher), market_dir));
         let holdings = HoldingsService::new();
-        let state = AppState { store: store.clone(), market: market.clone(), holdings: holdings.clone() };
+        struct DummySeg;
+        #[async_trait]
+        impl SegmentFetcher for DummySeg {
+            async fn fetch_segment(&self, id: u64) -> anyhow::Result<strava::Segment> {
+                Ok(strava::Segment { id, name: "seg".into(), distance: 1.0, average_grade: 1.0 })
+            }
+        }
+        #[async_trait]
+        impl ActivityFetcher for DummySeg {
+            async fn fetch_activity(&self, id: u64) -> anyhow::Result<strava::Activity> {
+                Ok(strava::Activity {
+                    id,
+                    name: "act".into(),
+                    segments: Vec::new(),
+                    average_heartrate: None,
+                    max_heartrate: None,
+                })
+            }
+        }
+        let state = AppState {
+            store: store.clone(),
+            market: market.clone(),
+            holdings: holdings.clone(),
+            strava: Arc::new(DummySeg),
+            activities: ActivityStore::new(dir.path().join("acts")),
+        };
         market.update(&store, &holdings).await.unwrap();
 
         let app = Router::new()
@@ -356,5 +537,189 @@ mod tests {
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let all: Vec<crate::portfolio::Holding> = serde_json::from_slice(&body).unwrap();
         assert_eq!(all.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_strava_segment_endpoint() {
+        struct DummySeg;
+        #[async_trait]
+        impl SegmentFetcher for DummySeg {
+            async fn fetch_segment(&self, id: u64) -> anyhow::Result<strava::Segment> {
+                Ok(strava::Segment { id, name: "demo".into(), distance: 2.0, average_grade: 3.0 })
+            }
+        }
+
+        #[async_trait]
+        impl ActivityFetcher for DummySeg {
+            async fn fetch_activity(&self, id: u64) -> anyhow::Result<strava::Activity> {
+                Ok(strava::Activity {
+                    id,
+                    name: "ride".into(),
+                    segments: vec![strava::Segment { id: 1, name: "seg".into(), distance: 1.0, average_grade: 1.0 }],
+                    average_heartrate: None,
+                    max_heartrate: None,
+                })
+            }
+        }
+
+        struct DummyFetcher;
+        #[async_trait]
+        impl QuoteFetcher for DummyFetcher {
+            async fn fetch_quotes(&self, _symbol: &str) -> anyhow::Result<Vec<Quote>> { Ok(Vec::new()) }
+        }
+        let state = AppState {
+            store: HoldingStore::new(tempdir().unwrap().path().to_path_buf()),
+            market: Arc::new(MarketData::new(Arc::new(DummyFetcher), tempdir().unwrap().path().to_path_buf())),
+            holdings: HoldingsService::new(),
+            strava: Arc::new(DummySeg),
+            activities: ActivityStore::new(tempdir().unwrap().path().join("acts")),
+        };
+        let app = Router::new()
+            .route("/strava/segment/:id", get(strava_segment))
+            .with_state(state);
+
+        let response = app
+            .oneshot(Request::builder().uri("/strava/segment/42").body(axum::body::Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let seg: strava::Segment = serde_json::from_slice(&body).unwrap();
+        assert_eq!(seg.id, 42);
+    }
+
+    #[tokio::test]
+    async fn test_download_activity() {
+        #[derive(Clone)]
+        struct Dummy {
+            calls: Arc<Mutex<usize>>,
+        }
+        #[async_trait]
+        impl SegmentFetcher for Dummy {
+            async fn fetch_segment(&self, id: u64) -> anyhow::Result<strava::Segment> {
+                Ok(strava::Segment { id, name: "x".into(), distance: 1.0, average_grade: 1.0 })
+            }
+        }
+        #[async_trait]
+        impl ActivityFetcher for Dummy {
+            async fn fetch_activity(&self, id: u64) -> anyhow::Result<strava::Activity> {
+                let mut c = self.calls.lock().await;
+                *c += 1;
+                Ok(strava::Activity {
+                    id,
+                    name: "demo".into(),
+                    segments: vec![strava::Segment { id: 9, name: "s".into(), distance: 1.0, average_grade: 1.0 }],
+                    average_heartrate: Some(100.0),
+                    max_heartrate: Some(150.0),
+                })
+            }
+        }
+        struct DummyQuote;
+        #[async_trait]
+        impl QuoteFetcher for DummyQuote {
+            async fn fetch_quotes(&self, _symbol: &str) -> anyhow::Result<Vec<Quote>> { Ok(Vec::new()) }
+        }
+        let dir = tempdir().unwrap();
+        let act_dir = dir.path().join("activities");
+        let fetcher = Dummy { calls: Arc::new(Mutex::new(0)) };
+        let state = AppState {
+            store: HoldingStore::new(dir.path().join("data")),
+            market: Arc::new(MarketData::new(Arc::new(DummyQuote), dir.path().join("m"))),
+            holdings: HoldingsService::new(),
+            strava: Arc::new(fetcher.clone()),
+            activities: ActivityStore::new(act_dir.clone()),
+        };
+        let app = Router::new()
+            .route("/strava/activity/:id", get(download_activity))
+            .with_state(state.clone());
+
+        let response = app.clone()
+            .oneshot(Request::builder().uri("/strava/activity/5").body(axum::body::Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let stored = state.activities.get(5).await.unwrap();
+        assert_eq!(stored.average_heartrate, Some(100.0));
+        let calls = *fetcher.calls.lock().await;
+        assert_eq!(calls, 1);
+
+        // second call should not trigger another fetch
+        let response = app.clone()
+            .oneshot(Request::builder().uri("/strava/activity/5").body(axum::body::Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let calls = *fetcher.calls.lock().await;
+        assert_eq!(calls, 1);
+    }
+
+    #[tokio::test]
+    async fn test_download_activity_updates_missing_fields() {
+        #[derive(Clone)]
+        struct Dummy {
+            calls: Arc<Mutex<usize>>,
+        }
+        #[async_trait]
+        impl SegmentFetcher for Dummy {
+            async fn fetch_segment(&self, _id: u64) -> anyhow::Result<strava::Segment> {
+                Ok(strava::Segment { id: 1, name: "s".into(), distance: 1.0, average_grade: 1.0 })
+            }
+        }
+        #[async_trait]
+        impl ActivityFetcher for Dummy {
+            async fn fetch_activity(&self, id: u64) -> anyhow::Result<strava::Activity> {
+                let mut c = self.calls.lock().await;
+                *c += 1;
+                Ok(strava::Activity {
+                    id,
+                    name: "demo".into(),
+                    segments: vec![strava::Segment { id: 1, name: "s".into(), distance: 1.0, average_grade: 1.0 }],
+                    average_heartrate: Some(120.0),
+                    max_heartrate: Some(160.0),
+                })
+            }
+        }
+        struct DummyQuote;
+        #[async_trait]
+        impl QuoteFetcher for DummyQuote {
+            async fn fetch_quotes(&self, _symbol: &str) -> anyhow::Result<Vec<Quote>> { Ok(Vec::new()) }
+        }
+        let dir = tempdir().unwrap();
+        let act_dir = dir.path().join("activities");
+        let fetcher = Dummy { calls: Arc::new(Mutex::new(0)) };
+        let state = AppState {
+            store: HoldingStore::new(dir.path().join("data")),
+            market: Arc::new(MarketData::new(Arc::new(DummyQuote), dir.path().join("m"))),
+            holdings: HoldingsService::new(),
+            strava: Arc::new(fetcher.clone()),
+            activities: ActivityStore::new(act_dir.clone()),
+        };
+
+        // pre-store incomplete activity
+        state
+            .activities
+            .add(strava::Activity {
+                id: 7,
+                name: "demo".into(),
+                segments: Vec::new(),
+                average_heartrate: None,
+                max_heartrate: None,
+            })
+            .await
+            .unwrap();
+
+        let app = Router::new()
+            .route("/strava/activity/:id", get(download_activity))
+            .with_state(state.clone());
+
+        let response = app
+            .oneshot(Request::builder().uri("/strava/activity/7").body(axum::body::Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let stored = state.activities.get(7).await.unwrap();
+        assert_eq!(stored.average_heartrate, Some(120.0));
+        let calls = *fetcher.calls.lock().await;
+        assert_eq!(calls, 1);
     }
 }

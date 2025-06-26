@@ -11,6 +11,9 @@ This project is a minimal REST API built with [Axum](https://github.com/tokio-rs
 - `GET /holdings/<user>` – list holdings for a specific user.
 - `GET /market/prices` – current price for each symbol held by any user.
 - `GET /market/symbols` – list of all symbols currently tracked.
+- `GET /strava/segment/<id>` – fetch details for a Strava segment.
+- `GET /strava/activity/<id>` – download an activity and persist it. Subsequent
+  calls only hit Strava again if stored data is missing fields like heart rate.
 
 Transactions are kept in memory and flushed to Parquet files under `data/<user>/orders.parquet`.
 Market prices are periodically fetched from Yahoo Finance for all symbols found in those orders and served via `/market/prices`. Closing prices are stored under `data/market/<symbol>/prices.parquet` and refreshed every two minutes.
@@ -30,9 +33,16 @@ curl http://localhost:3000/holdings/orders/alice
 curl http://localhost:3000/holdings
 
 curl http://localhost:3000/holdings/alice
+
+curl http://localhost:3000/strava/segment/12345
+
+curl http://localhost:3000/strava/activity/6789
 ```
 
 ## Running locally
+
+Set `STRAVA_ACCESS_TOKEN` to your Strava API token so the server can query segments
+and activities.
 
 ```bash
 cargo run

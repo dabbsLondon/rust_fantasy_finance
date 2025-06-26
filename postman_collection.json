@@ -113,6 +113,32 @@
           "path": ["market", "symbols"]
         }
       }
+    },
+    {
+      "name": "Strava segment",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "http://localhost:3000/strava/segment/12345",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "3000",
+          "path": ["strava", "segment", "12345"]
+        }
+      }
+    },
+    {
+      "name": "Strava activity",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "http://localhost:3000/strava/activity/6789",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "3000",
+          "path": ["strava", "activity", "6789"]
+        }
+      }
     }
   ]
 }
