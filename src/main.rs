@@ -4,6 +4,7 @@ mod market;
 mod state;
 mod portfolio;
 mod activity;
+mod strava;
 
 use axum::{routing::{get, post}, Router, response::IntoResponse, extract::{Path, State}, Json};
 use tokio::net::TcpListener;
@@ -100,6 +101,7 @@ async fn main() {
             id: "1".into(),
             metadata: "demo activity".into(),
             heart_rate: vec![60, 65, 70],
+            power: vec![150, 200],
             gps: vec![activity::GpsPoint { lat: 0.0, lon: 0.0 }],
         })
         .await;
@@ -390,6 +392,7 @@ mod tests {
                 id: "123".into(),
                 metadata: "demo".into(),
                 heart_rate: vec![1, 2, 3],
+                power: vec![50],
                 gps: vec![activity::GpsPoint { lat: 0.0, lon: 0.0 }],
             })
             .await;
